@@ -1,0 +1,17 @@
+{
+  "name": "sandcastle-bridge",
+  "private": true,
+  "version": "0.0.0",
+  "scripts": {
+    "deploy": "wrangler deploy",
+    "dev": "wrangler dev"
+  },
+  "dependencies": {
+    "@cloudflare/sandbox": "*"
+  },
+  "devDependencies": {
+    "wrangler": "*",
+    "@cloudflare/workers-types": "*",
+    "typescript": "*"
+  }
+}
