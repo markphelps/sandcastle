@@ -18,6 +18,10 @@
       "import": "./dist/sandboxes/vercel.js",
       "types": "./dist/sandboxes/vercel.d.ts"
     },
+    "./sandboxes/cloudflare": {
+      "import": "./dist/sandboxes/cloudflare.js",
+      "types": "./dist/sandboxes/cloudflare.d.ts"
+    },
     "./sandboxes/podman": {
       "import": "./dist/sandboxes/podman.js",
       "types": "./dist/sandboxes/podman.d.ts"

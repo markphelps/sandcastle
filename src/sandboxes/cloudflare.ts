@@ -266,8 +266,13 @@ export const cloudflare = (
           await mkdir(dirname(hostPath), { recursive: true });
           await writeFile(hostPath, buf);
         },
-        close: async () => {
-          // implemented in a later task
+        close: async (): Promise<void> => {
+          const url = buildSandboxUrl(workerUrl, sandboxId, "");
+          try {
+            await fetchImpl(url, { method: "DELETE", headers: authHeaders() });
+          } catch {
+            // best-effort: never throw from close()
+          }
         },
       };
     },

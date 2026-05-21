@@ -373,3 +373,37 @@ describe("copyIn() + copyFileOut()", () => {
     expect(await readFile(dest, "utf8")).toBe("downloaded");
   });
 });
+
+describe("close()", () => {
+  it("DELETEs the sandbox", async () => {
+    const { fn, calls } = mockFetch([
+      sseResponse([`data: {"type":"exit","code":0}\n\n`]),
+      new Response(null, { status: 204 }),
+    ]);
+    const provider = cloudflare({
+      workerUrl: "https://example.workers.dev",
+      authToken: "tok",
+      sandboxId: "sb-1",
+      fetch: fn,
+    });
+    const handle = await provider.create({ env: {} });
+    await handle.close();
+    expect(calls[1]!.init.method).toBe("DELETE");
+    expect(calls[1]!.url).toBe("https://example.workers.dev/sandboxes/sb-1");
+  });
+
+  it("swallows close errors so teardown is best-effort", async () => {
+    const { fn } = mockFetch([
+      sseResponse([`data: {"type":"exit","code":0}\n\n`]),
+      new Response("nope", { status: 500 }),
+    ]);
+    const provider = cloudflare({
+      workerUrl: "https://example.workers.dev",
+      authToken: "tok",
+      sandboxId: "sb-1",
+      fetch: fn,
+    });
+    const handle = await provider.create({ env: {} });
+    await expect(handle.close()).resolves.toBeUndefined();
+  });
+});
