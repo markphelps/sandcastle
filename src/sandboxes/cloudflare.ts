@@ -120,6 +120,96 @@ export const cloudflare = (
     name: "cloudflare",
     env: options.env,
     create: async (): Promise<IsolatedSandboxHandle> => {
-      throw new Error("not yet implemented");
+      const fetchImpl = options.fetch ?? globalThis.fetch;
+      const authToken = resolveAuthToken(options.authToken, process.env);
+      const sandboxId = options.sandboxId ?? crypto.randomUUID();
+      const worktreePath = options.worktreePath ?? DEFAULT_WORKTREE_PATH;
+      const workerUrl = options.workerUrl;
+
+      const authHeaders = (
+        extra?: ConstructorParameters<typeof Headers>[0],
+      ): Headers => {
+        const h = new Headers(extra);
+        h.set("authorization", `Bearer ${authToken}`);
+        return h;
+      };
+
+      const requireOk = async (
+        res: Response,
+        what: string,
+      ): Promise<Response> => {
+        if (res.ok) return res;
+        const body = await res.text().catch(() => "");
+        throw new Error(
+          `cloudflare ${what}: HTTP ${res.status} ${res.statusText}${body ? ` — ${body}` : ""}`,
+        );
+      };
+
+      const execImpl = async (
+        command: string,
+        opts?: {
+          onLine?: (line: string) => void;
+          cwd?: string;
+          sudo?: boolean;
+        },
+      ): Promise<ExecResult> => {
+        const url = buildSandboxUrl(workerUrl, sandboxId, "/exec");
+        const body: Record<string, unknown> = {
+          command,
+          cwd: opts?.cwd ?? worktreePath,
+        };
+        if (opts?.sudo) body["sudo"] = true;
+        const res = await requireOk(
+          await fetchImpl(url, {
+            method: "POST",
+            headers: authHeaders({ "content-type": "application/json" }),
+            body: JSON.stringify(body),
+          }),
+          "exec",
+        );
+        if (!res.body) {
+          throw new Error("cloudflare exec: response had no body stream");
+        }
+        const stdoutLines: string[] = [];
+        const stderrChunks: string[] = [];
+        let exitCode = 0;
+        for await (const ev of parseSseExecStream(res.body)) {
+          if (ev.type === "stdout") {
+            stdoutLines.push(ev.line);
+            opts?.onLine?.(ev.line);
+          } else if (ev.type === "stderr") {
+            stderrChunks.push(ev.line);
+          } else {
+            exitCode = ev.code;
+          }
+        }
+        return {
+          stdout: stdoutLines.join("\n"),
+          stderr: stderrChunks.join(""),
+          exitCode,
+        };
+      };
+
+      // Warm-up: materialize the Durable Object and verify connectivity.
+      const warm = await execImpl(`mkdir -p ${JSON.stringify(worktreePath)}`);
+      if (warm.exitCode !== 0) {
+        throw new Error(
+          `cloudflare: failed to initialize worktree (${worktreePath}): exit ${warm.exitCode}`,
+        );
+      }
+
+      return {
+        worktreePath,
+        exec: execImpl,
+        copyIn: async () => {
+          throw new Error("copyIn: not yet implemented");
+        },
+        copyFileOut: async () => {
+          throw new Error("copyFileOut: not yet implemented");
+        },
+        close: async () => {
+          // implemented in a later task
+        },
+      };
     },
   });

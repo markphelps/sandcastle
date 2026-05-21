@@ -131,3 +131,122 @@ describe("buildSandboxUrl()", () => {
     );
   });
 });
+
+type FetchCall = { url: string; init: RequestInit };
+
+const mockFetch = (responses: Response[]) => {
+  const calls: FetchCall[] = [];
+  let idx = 0;
+  const fn: typeof fetch = async (input, init) => {
+    calls.push({ url: String(input), init: init ?? {} });
+    const next = responses[idx++];
+    if (!next) throw new Error("mockFetch: no more responses queued");
+    return next;
+  };
+  return { fn, calls };
+};
+
+const sseResponse = (events: string[]): Response =>
+  new Response(events.join(""), {
+    status: 200,
+    headers: { "content-type": "text/event-stream" },
+  });
+
+describe("create() + exec()", () => {
+  it("creates a sandbox, executes a command, streams lines, and sends auth header", async () => {
+    const { fn, calls } = mockFetch([
+      // create() warmup mkdir
+      sseResponse([`data: {"type":"exit","code":0}\n\n`]),
+      // user-issued exec
+      sseResponse([
+        `data: {"type":"stdout","line":"hello"}\n\n`,
+        `data: {"type":"stdout","line":"world"}\n\n`,
+        `data: {"type":"stderr","line":"warn"}\n\n`,
+        `data: {"type":"exit","code":0}\n\n`,
+      ]),
+    ]);
+    const provider = cloudflare({
+      workerUrl: "https://example.workers.dev",
+      authToken: "tok",
+      sandboxId: "sb-1",
+      fetch: fn,
+    });
+    const handle = await provider.create({ env: {} });
+    expect(handle.worktreePath).toBe("/workspace");
+
+    const lines: string[] = [];
+    const result = await handle.exec("echo hello", {
+      onLine: (l) => lines.push(l),
+    });
+    expect(result).toEqual({
+      stdout: "hello\nworld",
+      stderr: "warn",
+      exitCode: 0,
+    });
+    expect(lines).toEqual(["hello", "world"]);
+
+    // Auth header is set on every request
+    for (const call of calls) {
+      const headers = new Headers(
+        call.init.headers as ConstructorParameters<typeof Headers>[0],
+      );
+      expect(headers.get("authorization")).toBe("Bearer tok");
+    }
+    // First call: mkdir warmup
+    expect(calls[0]!.url).toBe(
+      "https://example.workers.dev/sandboxes/sb-1/exec",
+    );
+    // Second call: user exec
+    expect(calls[1]!.init.method).toBe("POST");
+    const body = JSON.parse(String(calls[1]!.init.body));
+    expect(body).toEqual({ command: "echo hello", cwd: "/workspace" });
+  });
+
+  it("forwards non-zero exit code", async () => {
+    const { fn } = mockFetch([
+      sseResponse([`data: {"type":"exit","code":0}\n\n`]),
+      sseResponse([`data: {"type":"exit","code":42}\n\n`]),
+    ]);
+    const provider = cloudflare({
+      workerUrl: "https://example.workers.dev",
+      authToken: "tok",
+      sandboxId: "sb-1",
+      fetch: fn,
+    });
+    const handle = await provider.create({ env: {} });
+    const result = await handle.exec("false");
+    expect(result.exitCode).toBe(42);
+  });
+
+  it("passes cwd and sudo through", async () => {
+    const { fn, calls } = mockFetch([
+      sseResponse([`data: {"type":"exit","code":0}\n\n`]),
+      sseResponse([`data: {"type":"exit","code":0}\n\n`]),
+    ]);
+    const provider = cloudflare({
+      workerUrl: "https://example.workers.dev",
+      authToken: "tok",
+      sandboxId: "sb-1",
+      fetch: fn,
+    });
+    const handle = await provider.create({ env: {} });
+    await handle.exec("ls", { cwd: "/elsewhere", sudo: true });
+    const body = JSON.parse(String(calls[1]!.init.body));
+    expect(body).toEqual({ command: "ls", cwd: "/elsewhere", sudo: true });
+  });
+
+  it("throws clear error on HTTP failure", async () => {
+    const { fn } = mockFetch([
+      sseResponse([`data: {"type":"exit","code":0}\n\n`]),
+      new Response("nope", { status: 500 }),
+    ]);
+    const provider = cloudflare({
+      workerUrl: "https://example.workers.dev",
+      authToken: "tok",
+      sandboxId: "sb-1",
+      fetch: fn,
+    });
+    const handle = await provider.create({ env: {} });
+    await expect(handle.exec("boom")).rejects.toThrow(/500/);
+  });
+});
