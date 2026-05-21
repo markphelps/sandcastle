@@ -72,6 +72,7 @@ Sandcastle uses a `SandboxProvider` to create isolated environments. The `sandbo
 | Docker     | `@ai-hero/sandcastle/sandboxes/docker`     | Bind-mount | `run()`, `createSandbox()`, `interactive()` |
 | Podman     | `@ai-hero/sandcastle/sandboxes/podman`     | Bind-mount | `run()`, `createSandbox()`, `interactive()` |
 | Vercel     | `@ai-hero/sandcastle/sandboxes/vercel`     | Isolated   | `run()`, `createSandbox()`, `interactive()` |
+| Cloudflare | `@ai-hero/sandcastle/sandboxes/cloudflare` | Isolated   | `run()`, `createSandbox()`, `interactive()` |
 | No-sandbox | `@ai-hero/sandcastle/sandboxes/no-sandbox` | None       | `run()`, `createSandbox()`, `interactive()` |
 
 Worktree methods (`wt.run()`, `wt.interactive()`, `wt.createSandbox()`) accept the same providers as their top-level counterparts. `wt.interactive()` defaults to `noSandbox()` when no sandbox is specified.
@@ -80,6 +81,7 @@ Worktree methods (`wt.run()`, `wt.interactive()`, `wt.createSandbox()`) accept t
 import { docker } from "@ai-hero/sandcastle/sandboxes/docker";
 import { podman } from "@ai-hero/sandcastle/sandboxes/podman";
 import { vercel } from "@ai-hero/sandcastle/sandboxes/vercel";
+import { cloudflare } from "@ai-hero/sandcastle/sandboxes/cloudflare";
 import { noSandbox } from "@ai-hero/sandcastle/sandboxes/no-sandbox";
 
 // Docker, Podman, and Vercel are interchangeable in run() and createSandbox():
@@ -100,6 +102,56 @@ await interactive({
 ```
 
 You can also [create your own provider](#custom-sandbox-providers) using `createBindMountSandboxProvider` or `createIsolatedSandboxProvider`.
+
+### Cloudflare
+
+Cloudflare Sandbox is consumed via a small bridge Worker you deploy to your own Cloudflare account. Sandcastle ships the Worker as an init template; the `cloudflare()` provider speaks HTTPS to it.
+
+Prerequisites:
+
+- A Cloudflare account on the Workers Paid plan (Sandbox SDK is paid-tier).
+- [Wrangler](https://developers.cloudflare.com/workers/wrangler/install-and-update/) installed.
+- Docker running locally (Wrangler uses it during `wrangler deploy` to build the container image).
+
+One-time setup:
+
+```bash
+sandcastle init              # choose `cloudflare` as the sandbox provider
+cd .sandcastle/cloudflare-worker
+npm install
+npx wrangler login
+cd ../..
+sandcastle cloudflare set-token   # sets the bridge auth token
+sandcastle cloudflare deploy      # deploys the Worker and prints its URL
+```
+
+Then put the printed Worker URL and the token into `.sandcastle/.env`:
+
+```
+SANDCASTLE_WORKER_URL=https://sandcastle-bridge.<acct>.workers.dev
+CLOUDFLARE_SANDCASTLE_TOKEN=<the same token you set via set-token>
+```
+
+Use the provider:
+
+```ts
+import { run, claudeCode } from "@ai-hero/sandcastle";
+import { cloudflare } from "@ai-hero/sandcastle/sandboxes/cloudflare";
+
+await run({
+  agent: claudeCode("claude-opus-4-7"),
+  sandbox: cloudflare({
+    workerUrl: process.env.SANDCASTLE_WORKER_URL!,
+  }),
+  promptFile: ".sandcastle/prompt.md",
+});
+```
+
+Limitations in this release:
+
+- One sandbox per Sandcastle run (no shared/long-lived sandbox across runs from a single user yet).
+- No preview-URL / port exposure — Sandcastle does not expose ports today.
+- The bridge Worker uses a single shared bearer token; rotate it with `sandcastle cloudflare set-token`.
 
 ## API
 
