@@ -323,6 +323,7 @@ const initCommand = Command.make(
       const nextSteps = getNextStepsLines(
         selectedTemplate,
         scaffoldResult.mainFilename,
+        selectedSandboxProvider.name,
       );
       for (const [i, line] of nextSteps.entries()) {
         yield* d.text(i === 0 ? line : styleText("dim", line));

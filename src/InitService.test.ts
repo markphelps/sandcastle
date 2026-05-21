@@ -2039,3 +2039,32 @@ describe("scaffold() with cloudflare provider", () => {
     expect(main).not.toMatch(/\bdocker\(/);
   });
 });
+
+describe("cloudflare .env.example additions", () => {
+  it("appends SANDCASTLE_WORKER_URL and CLOUDFLARE_SANDCASTLE_TOKEN", async () => {
+    const repoDir = await mkdtemp(join(tmpdir(), "sc-init-cf-env-"));
+    const agent = getAgent("claude-code")!;
+    const sandboxProvider = getSandboxProvider("cloudflare")!;
+    await runScaffold(repoDir, {
+      agent,
+      model: "claude-opus-4-7",
+      templateName: "blank",
+      sandboxProvider,
+    });
+    const env = await readFile(
+      join(repoDir, ".sandcastle", ".env.example"),
+      "utf8",
+    );
+    expect(env).toContain("SANDCASTLE_WORKER_URL=");
+    expect(env).toContain("CLOUDFLARE_SANDCASTLE_TOKEN=");
+  });
+});
+
+describe("getNextStepsLines() for cloudflare", () => {
+  it("mentions wrangler deploy and the auth token", () => {
+    const lines = getNextStepsLines("blank", "main.ts", "cloudflare");
+    const joined = lines.join("\n");
+    expect(joined).toMatch(/wrangler deploy|sandcastle cloudflare deploy/);
+    expect(joined).toMatch(/SANDCASTLE_WORKER_URL/);
+  });
+});

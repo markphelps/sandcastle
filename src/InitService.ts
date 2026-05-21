@@ -357,9 +357,11 @@ export const getSandboxProvider = (
 export function getNextStepsLines(
   template: string,
   mainFilename: string,
+  sandboxProviderName?: string,
 ): string[] {
+  let lines: string[];
   if (template === "blank") {
-    return [
+    lines = [
       "Next steps:",
       `1. Set the required env vars in .sandcastle/.env (see .sandcastle/.env.example)`,
       "   If you want to use your Claude subscription instead of an API key, see https://github.com/mattpocock/sandcastle/issues/191",
@@ -371,7 +373,7 @@ export function getNextStepsLines(
   } else {
     const hasReviewer = template.includes("review");
     let step = 1;
-    const lines: string[] = [
+    lines = [
       "Next steps:",
       `${step++}. Set the required env vars in .sandcastle/.env (see .sandcastle/.env.example)`,
       "   If you want to use your Claude subscription instead of an API key, see https://github.com/mattpocock/sandcastle/issues/191",
@@ -385,8 +387,19 @@ export function getNextStepsLines(
       );
     }
     lines.push(`${step++}. Run \`npm run sandcastle\` to start the agent`);
-    return lines;
   }
+  if (sandboxProviderName === "cloudflare") {
+    lines.push(
+      "",
+      "Cloudflare bridge Worker setup (run once):",
+      "  cd .sandcastle/cloudflare-worker && npm install",
+      "  npx wrangler login",
+      "  sandcastle cloudflare set-token   # set SANDCASTLE_AUTH_TOKEN",
+      "  sandcastle cloudflare deploy      # deploy the Worker, prints URL",
+      "  Then set SANDCASTLE_WORKER_URL in .sandcastle/.env",
+    );
+  }
+  return lines;
 }
 
 // ---------------------------------------------------------------------------
@@ -733,6 +746,11 @@ export const scaffold = (
     const envExampleParts = [agent.envExample];
     if (backlogManager.envExample) {
       envExampleParts.push(backlogManager.envExample);
+    }
+    if (sandboxProvider.name === "cloudflare") {
+      envExampleParts.push(
+        "# Bridge Worker URL — copy from `sandcastle cloudflare deploy` output\nSANDCASTLE_WORKER_URL=\n# Bearer token matching the Worker's SANDCASTLE_AUTH_TOKEN secret\nCLOUDFLARE_SANDCASTLE_TOKEN=",
+      );
     }
     const envExampleContent = envExampleParts.join("\n") + "\n";
 
