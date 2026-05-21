@@ -2,7 +2,7 @@ import { Command, Options } from "@effect/cli";
 import { FileSystem } from "@effect/platform";
 import { Effect } from "effect";
 import * as clack from "@clack/prompts";
-import { execSync } from "node:child_process";
+import { execSync, spawnSync } from "node:child_process";
 import { createRequire } from "node:module";
 import { join } from "node:path";
 import { styleText } from "node:util";
@@ -477,6 +477,102 @@ const podmanCommand = Command.make("podman", {}, () =>
   Command.withSubcommands([podmanBuildImageCommand, podmanRemoveImageCommand]),
 );
 
+// --- Cloudflare worker directory check ---
+
+const CLOUDFLARE_WORKER_DIR = join(".sandcastle", "cloudflare-worker");
+
+const requireCloudflareWorkerDir = (
+  cwd: string,
+): Effect.Effect<void, ConfigDirError, FileSystem.FileSystem> =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const exists = yield* fs
+      .exists(join(cwd, CLOUDFLARE_WORKER_DIR))
+      .pipe(Effect.catchAll(() => Effect.succeed(false)));
+    if (!exists) {
+      yield* Effect.fail(
+        new ConfigDirError({
+          message: `Missing ${CLOUDFLARE_WORKER_DIR}. Run \`sandcastle init\` and choose \`cloudflare\` as the sandbox provider, or scaffold the directory manually.`,
+        }),
+      );
+    }
+  });
+
+// --- Cloudflare deploy command ---
+
+const cloudflareDeployCommand = Command.make("deploy", {}, () =>
+  Effect.gen(function* () {
+    const d = yield* Display;
+    const cwd = process.cwd();
+    yield* requireCloudflareWorkerDir(cwd);
+    const workerDir = join(cwd, CLOUDFLARE_WORKER_DIR);
+    yield* d.status(
+      `Deploying bridge Worker from ${CLOUDFLARE_WORKER_DIR}...`,
+      "info",
+    );
+    const result = spawnSync("npx", ["wrangler", "deploy"], {
+      cwd: workerDir,
+      stdio: "inherit",
+    });
+    if (result.status !== 0) {
+      return yield* Effect.fail(
+        new Error(
+          `wrangler deploy exited with code ${result.status ?? "unknown"}`,
+        ),
+      );
+    }
+    yield* d.status(
+      "Deploy complete. Copy the printed Worker URL into .sandcastle/.env as SANDCASTLE_WORKER_URL.",
+      "success",
+    );
+  }),
+);
+
+// --- Cloudflare set-token command ---
+
+const cloudflareSetTokenCommand = Command.make("set-token", {}, () =>
+  Effect.gen(function* () {
+    const d = yield* Display;
+    const cwd = process.cwd();
+    yield* requireCloudflareWorkerDir(cwd);
+    const workerDir = join(cwd, CLOUDFLARE_WORKER_DIR);
+    yield* d.status(
+      "Setting SANDCASTLE_AUTH_TOKEN as a Worker secret...",
+      "info",
+    );
+    const result = spawnSync(
+      "npx",
+      ["wrangler", "secret", "put", "SANDCASTLE_AUTH_TOKEN"],
+      { cwd: workerDir, stdio: "inherit" },
+    );
+    if (result.status !== 0) {
+      return yield* Effect.fail(
+        new Error(
+          `wrangler secret put exited with code ${result.status ?? "unknown"}`,
+        ),
+      );
+    }
+    yield* d.status(
+      "Token set. Use the same value as CLOUDFLARE_SANDCASTLE_TOKEN in your Sandcastle environment.",
+      "success",
+    );
+  }),
+);
+
+// --- Cloudflare namespace command ---
+
+const cloudflareCommand = Command.make("cloudflare", {}, () =>
+  Effect.gen(function* () {
+    const d = yield* Display;
+    yield* d.status(
+      "Cloudflare bridge Worker commands. Use --help to see available subcommands.",
+      "info",
+    );
+  }),
+).pipe(
+  Command.withSubcommands([cloudflareDeployCommand, cloudflareSetTokenCommand]),
+);
+
 // --- Root command ---
 
 const rootCommand = Command.make("sandcastle", {}, () =>
@@ -488,7 +584,12 @@ const rootCommand = Command.make("sandcastle", {}, () =>
 );
 
 export const sandcastle = rootCommand.pipe(
-  Command.withSubcommands([initCommand, dockerCommand, podmanCommand]),
+  Command.withSubcommands([
+    initCommand,
+    dockerCommand,
+    podmanCommand,
+    cloudflareCommand,
+  ]),
 );
 
 export const cli = Command.run(sandcastle, {
