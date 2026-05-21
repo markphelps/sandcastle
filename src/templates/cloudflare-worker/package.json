@@ -7,7 +7,7 @@
     "dev": "wrangler dev"
   },
   "dependencies": {
-    "@cloudflare/sandbox": "^0.5.0"
+    "@cloudflare/sandbox": "^0.10.0"
   },
   "devDependencies": {
     "wrangler": "^4.0.0",
