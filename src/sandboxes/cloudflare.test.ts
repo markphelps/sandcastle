@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { buildSandboxUrl, cloudflare, resolveAuthToken } from "./cloudflare.js";
+import {
+  buildSandboxUrl,
+  cloudflare,
+  parseSseExecStream,
+  resolveAuthToken,
+  type ExecStreamEvent,
+} from "./cloudflare.js";
 
 describe("cloudflare()", () => {
   it("returns a SandboxProvider with tag 'isolated' and name 'cloudflare'", () => {
@@ -39,6 +45,66 @@ describe("resolveAuthToken()", () => {
     expect(() => resolveAuthToken(undefined, {})).toThrow(
       /CLOUDFLARE_SANDCASTLE_TOKEN/,
     );
+  });
+});
+
+const streamFromChunks = (chunks: string[]): ReadableStream<Uint8Array> => {
+  const encoder = new TextEncoder();
+  return new ReadableStream({
+    start(controller) {
+      for (const c of chunks) controller.enqueue(encoder.encode(c));
+      controller.close();
+    },
+  });
+};
+
+describe("parseSseExecStream()", () => {
+  it("parses stdout, stderr, and exit events", async () => {
+    const stream = streamFromChunks([
+      `data: {"type":"stdout","line":"hello"}\n\n`,
+      `data: {"type":"stderr","line":"warn"}\n\n`,
+      `data: {"type":"exit","code":0}\n\n`,
+    ]);
+    const events: ExecStreamEvent[] = [];
+    for await (const ev of parseSseExecStream(stream)) events.push(ev);
+    expect(events).toEqual([
+      { type: "stdout", line: "hello" },
+      { type: "stderr", line: "warn" },
+      { type: "exit", code: 0 },
+    ]);
+  });
+
+  it("handles events split across chunks", async () => {
+    const stream = streamFromChunks([
+      `data: {"type":"stdout","line":"hel`,
+      `lo"}\n\ndata: {"type":"exit","code":1}\n\n`,
+    ]);
+    const events: ExecStreamEvent[] = [];
+    for await (const ev of parseSseExecStream(stream)) events.push(ev);
+    expect(events).toEqual([
+      { type: "stdout", line: "hello" },
+      { type: "exit", code: 1 },
+    ]);
+  });
+
+  it("ignores non-data lines (comments, retry directives)", async () => {
+    const stream = streamFromChunks([
+      `: keepalive\n\n`,
+      `retry: 1000\n\n`,
+      `data: {"type":"exit","code":0}\n\n`,
+    ]);
+    const events: ExecStreamEvent[] = [];
+    for await (const ev of parseSseExecStream(stream)) events.push(ev);
+    expect(events).toEqual([{ type: "exit", code: 0 }]);
+  });
+
+  it("throws on malformed JSON", async () => {
+    const stream = streamFromChunks([`data: not-json\n\n`]);
+    await expect(async () => {
+      for await (const _ of parseSseExecStream(stream)) {
+        // consume
+      }
+    }).rejects.toThrow(/parse/i);
   });
 });
 

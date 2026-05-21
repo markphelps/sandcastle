@@ -41,6 +41,48 @@ export interface CloudflareOptions {
 
 const DEFAULT_WORKTREE_PATH = "/workspace";
 
+export type ExecStreamEvent =
+  | { type: "stdout"; line: string }
+  | { type: "stderr"; line: string }
+  | { type: "exit"; code: number };
+
+export async function* parseSseExecStream(
+  stream: ReadableStream<Uint8Array>,
+): AsyncGenerator<ExecStreamEvent, void, void> {
+  const reader = stream.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      // SSE events are separated by a blank line.
+      let sepIdx: number;
+      while ((sepIdx = buffer.indexOf("\n\n")) !== -1) {
+        const block = buffer.slice(0, sepIdx);
+        buffer = buffer.slice(sepIdx + 2);
+        for (const line of block.split("\n")) {
+          if (!line.startsWith("data:")) continue;
+          const payload = line.slice(5).trim();
+          if (!payload) continue;
+          let parsed: ExecStreamEvent;
+          try {
+            parsed = JSON.parse(payload) as ExecStreamEvent;
+          } catch (err) {
+            throw new Error(
+              `cloudflare: failed to parse SSE payload "${payload}": ${(err as Error).message}`,
+            );
+          }
+          yield parsed;
+        }
+      }
+    }
+  } finally {
+    reader.releaseLock();
+  }
+}
+
 export const resolveAuthToken = (
   explicit: string | undefined,
   env: NodeJS.ProcessEnv,
