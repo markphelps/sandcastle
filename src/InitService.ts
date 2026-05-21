@@ -334,6 +334,12 @@ const SANDBOX_PROVIDER_REGISTRY: SandboxProviderEntry[] = [
     containerfileName: "Containerfile",
     cliNamespace: "podman",
   },
+  {
+    name: "cloudflare",
+    label: "Cloudflare",
+    containerfileName: "Dockerfile",
+    cliNamespace: "cloudflare",
+  },
 ];
 
 export const listSandboxProviders = (): SandboxProviderEntry[] =>
@@ -446,16 +452,56 @@ const copyTemplateFiles = (
   });
 
 /**
+ * Copy the cloudflare-worker template directory into the scaffolded config.
+ *
+ * Used when `sandboxProvider.name === "cloudflare"` — the worker acts as the
+ * bridge between the Node-side `cloudflare()` provider and the
+ * `@cloudflare/sandbox` Durable Object that hosts the agent container.
+ */
+const copyCloudflareWorkerTemplate = (
+  configDir: string,
+): Effect.Effect<void, Error, FileSystem.FileSystem> =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const srcDir = join(getTemplatesDir(), "cloudflare-worker");
+    const dstDir = join(configDir, "cloudflare-worker");
+    yield* fs
+      .makeDirectory(dstDir, { recursive: true })
+      .pipe(Effect.mapError((e) => new Error(e.message)));
+    const files = yield* fs
+      .readDirectory(srcDir)
+      .pipe(Effect.mapError((e) => new Error(e.message)));
+    yield* Effect.all(
+      files.map((f) =>
+        Effect.gen(function* () {
+          const content = yield* fs
+            .readFileString(join(srcDir, f))
+            .pipe(Effect.mapError((e) => new Error(e.message)));
+          yield* fs
+            .writeFileString(join(dstDir, f), content)
+            .pipe(Effect.mapError((e) => new Error(e.message)));
+        }),
+      ),
+      { concurrency: "unbounded" },
+    );
+  });
+
+/**
  * Replace the agent factory import and call in a scaffolded main.ts.
  *
  * Templates use `claudeCode` as the default factory. When a different agent or
  * model is selected, this function rewrites the import and factory calls.
+ *
+ * Templates also always import the docker sandbox provider as a placeholder.
+ * When a non-docker provider is selected, this function rewrites the sandbox
+ * import path and call to match the selected provider.
  */
 const rewriteMainTs = (
   configDir: string,
   agent: AgentEntry,
   model: string,
   mainFilename: string,
+  sandboxProvider: SandboxProviderEntry,
 ): Effect.Effect<void, Error, FileSystem.FileSystem> =>
   Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem;
@@ -489,6 +535,22 @@ const rewriteMainTs = (
       factoryCallRe,
       `${agent.factoryImport}("${model}")`,
     );
+
+    if (sandboxProvider.name !== "docker") {
+      // Templates always import from sandboxes/docker as the placeholder.
+      const importRe = /@ai-hero\/sandcastle\/sandboxes\/docker/g;
+      content = content.replace(
+        importRe,
+        `@ai-hero/sandcastle/sandboxes/${sandboxProvider.name}`,
+      );
+      // Replace `docker(` callsites with `<provider>(`.
+      content = content.replace(/\bdocker\(/g, `${sandboxProvider.name}(`);
+      // Replace `import { docker }` named import.
+      content = content.replace(
+        /\bimport \{ docker \}/g,
+        `import { ${sandboxProvider.name} }`,
+      );
+    }
 
     yield* fs
       .writeFileString(mainTsPath, content)
@@ -693,8 +755,19 @@ export const scaffold = (
       { concurrency: "unbounded" },
     );
 
-    // Rewrite main file with the selected agent factory and model
-    yield* rewriteMainTs(configDir, agent, model, mainFilename);
+    // Rewrite main file with the selected agent factory, model, and sandbox provider
+    yield* rewriteMainTs(
+      configDir,
+      agent,
+      model,
+      mainFilename,
+      sandboxProvider,
+    );
+
+    // Cloudflare provider needs the bridge worker scaffolded alongside main.*
+    if (sandboxProvider.name === "cloudflare") {
+      yield* copyCloudflareWorkerTemplate(configDir);
+    }
 
     // Replace backlog manager template arguments in all text files (must run before label stripping)
     yield* substituteTemplateArgs(configDir, backlogManager);

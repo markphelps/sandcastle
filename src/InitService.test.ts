@@ -1979,3 +1979,63 @@ describe("Sandbox provider registry", () => {
     expect(getSandboxProvider("nonexistent")).toBeUndefined();
   });
 });
+
+// ---------------------------------------------------------------------------
+// Cloudflare sandbox provider
+// ---------------------------------------------------------------------------
+
+describe("cloudflare sandbox provider entry", () => {
+  it("appears in the registry", () => {
+    const names = listSandboxProviders().map((p) => p.name);
+    expect(names).toContain("cloudflare");
+  });
+
+  it("has the expected metadata", () => {
+    const entry = getSandboxProvider("cloudflare");
+    expect(entry).toBeDefined();
+    expect(entry!.containerfileName).toBe("Dockerfile");
+    expect(entry!.cliNamespace).toBe("cloudflare");
+    expect(entry!.label).toBe("Cloudflare");
+  });
+});
+
+describe("scaffold() with cloudflare provider", () => {
+  it("creates .sandcastle/cloudflare-worker/ alongside the standard files", async () => {
+    const dir = await makeDir();
+    const cloudflareProvider = getSandboxProvider("cloudflare")!;
+    await runScaffold(dir, { sandboxProvider: cloudflareProvider });
+
+    const { readdir } = await import("node:fs/promises");
+    const workerDir = join(dir, ".sandcastle", "cloudflare-worker");
+    const files = await readdir(workerDir);
+    expect(files.sort()).toEqual(
+      [
+        ".gitignore",
+        "package.json",
+        "tsconfig.json",
+        "worker.ts",
+        "wrangler.jsonc",
+      ].sort(),
+    );
+    // Worker references the parent Dockerfile
+    const wrangler = await readFile(join(workerDir, "wrangler.jsonc"), "utf-8");
+    expect(wrangler).toContain('"../Dockerfile"');
+  });
+
+  it("rewrites main.* import to use cloudflare() instead of docker()", async () => {
+    const dir = await makeDir();
+    // Ensure package.json#type==="module" so the file is named main.ts
+    await writeFile(
+      join(dir, "package.json"),
+      JSON.stringify({ type: "module" }),
+    );
+    const cloudflareProvider = getSandboxProvider("cloudflare")!;
+    await runScaffold(dir, { sandboxProvider: cloudflareProvider });
+
+    const main = await readFile(join(dir, ".sandcastle", "main.ts"), "utf-8");
+    expect(main).toContain('from "@ai-hero/sandcastle/sandboxes/cloudflare"');
+    expect(main).not.toContain('from "@ai-hero/sandcastle/sandboxes/docker"');
+    expect(main).toContain("cloudflare(");
+    expect(main).not.toMatch(/\bdocker\(/);
+  });
+});
