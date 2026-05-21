@@ -171,21 +171,21 @@ export const cloudflare = (
           throw new Error("cloudflare exec: response had no body stream");
         }
         const stdoutLines: string[] = [];
-        const stderrChunks: string[] = [];
+        const stderrLines: string[] = [];
         let exitCode = 0;
         for await (const ev of parseSseExecStream(res.body)) {
           if (ev.type === "stdout") {
             stdoutLines.push(ev.line);
             opts?.onLine?.(ev.line);
           } else if (ev.type === "stderr") {
-            stderrChunks.push(ev.line);
+            stderrLines.push(ev.line);
           } else {
             exitCode = ev.code;
           }
         }
         return {
           stdout: stdoutLines.join("\n"),
-          stderr: stderrChunks.join(""),
+          stderr: stderrLines.join("\n"),
           exitCode,
         };
       };
@@ -193,8 +193,9 @@ export const cloudflare = (
       // Warm-up: materialize the Durable Object and verify connectivity.
       const warm = await execImpl(`mkdir -p ${JSON.stringify(worktreePath)}`);
       if (warm.exitCode !== 0) {
+        const detail = warm.stderr ? ` — ${warm.stderr}` : "";
         throw new Error(
-          `cloudflare: failed to initialize worktree (${worktreePath}): exit ${warm.exitCode}`,
+          `cloudflare: failed to initialize worktree (${worktreePath}): exit ${warm.exitCode}${detail}`,
         );
       }
 

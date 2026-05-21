@@ -249,4 +249,42 @@ describe("create() + exec()", () => {
     const handle = await provider.create({ env: {} });
     await expect(handle.exec("boom")).rejects.toThrow(/500/);
   });
+
+  it("preserves newline separators in multi-line stderr", async () => {
+    const { fn } = mockFetch([
+      sseResponse([`data: {"type":"exit","code":0}\n\n`]),
+      sseResponse([
+        `data: {"type":"stderr","line":"first"}\n\n`,
+        `data: {"type":"stderr","line":"second"}\n\n`,
+        `data: {"type":"exit","code":0}\n\n`,
+      ]),
+    ]);
+    const provider = cloudflare({
+      workerUrl: "https://example.workers.dev",
+      authToken: "tok",
+      sandboxId: "sb-1",
+      fetch: fn,
+    });
+    const handle = await provider.create({ env: {} });
+    const result = await handle.exec("noop");
+    expect(result.stderr).toBe("first\nsecond");
+  });
+
+  it("includes warmup stderr in the create() failure message", async () => {
+    const { fn } = mockFetch([
+      sseResponse([
+        `data: {"type":"stderr","line":"permission denied"}\n\n`,
+        `data: {"type":"exit","code":1}\n\n`,
+      ]),
+    ]);
+    const provider = cloudflare({
+      workerUrl: "https://example.workers.dev",
+      authToken: "tok",
+      sandboxId: "sb-1",
+      fetch: fn,
+    });
+    await expect(provider.create({ env: {} })).rejects.toThrow(
+      /permission denied/,
+    );
+  });
 });
