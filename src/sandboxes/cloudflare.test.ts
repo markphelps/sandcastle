@@ -175,7 +175,7 @@ describe("create() + exec()", () => {
       fetch: fn,
     });
     const handle = await provider.create({ env: {} });
-    expect(handle.worktreePath).toBe("/workspace");
+    expect(handle.worktreePath).toBe("/home/agent");
 
     const lines: string[] = [];
     const result = await handle.exec("echo hello", {
@@ -202,7 +202,7 @@ describe("create() + exec()", () => {
     // Second call: user exec
     expect(calls[1]!.init.method).toBe("POST");
     const body = JSON.parse(String(calls[1]!.init.body));
-    expect(body).toEqual({ command: "echo hello", cwd: "/workspace" });
+    expect(body).toEqual({ command: "echo hello", cwd: "/home/agent" });
   });
 
   it("forwards non-zero exit code", async () => {

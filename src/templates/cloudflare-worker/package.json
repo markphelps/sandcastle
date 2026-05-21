@@ -7,11 +7,11 @@
     "dev": "wrangler dev"
   },
   "dependencies": {
-    "@cloudflare/sandbox": "*"
+    "@cloudflare/sandbox": "^0.5.0"
   },
   "devDependencies": {
-    "wrangler": "*",
-    "@cloudflare/workers-types": "*",
-    "typescript": "*"
+    "wrangler": "^4.0.0",
+    "@cloudflare/workers-types": "^4.20251001.0",
+    "typescript": "^5.6.0"
   }
 }
