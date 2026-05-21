@@ -41,6 +41,36 @@ export interface CloudflareOptions {
 
 const DEFAULT_WORKTREE_PATH = "/workspace";
 
+export const resolveAuthToken = (
+  explicit: string | undefined,
+  env: NodeJS.ProcessEnv,
+): string => {
+  const resolved = explicit ?? env["CLOUDFLARE_SANDCASTLE_TOKEN"];
+  if (!resolved) {
+    throw new Error(
+      "Cloudflare provider: no auth token. Pass `authToken` to cloudflare() " +
+        "or set CLOUDFLARE_SANDCASTLE_TOKEN in your environment.",
+    );
+  }
+  return resolved;
+};
+
+export const buildSandboxUrl = (
+  workerUrl: string,
+  sandboxId: string,
+  suffix: string,
+  query?: Record<string, string>,
+): string => {
+  const base = workerUrl.endsWith("/") ? workerUrl.slice(0, -1) : workerUrl;
+  const url = new URL(`${base}/sandboxes/${sandboxId}${suffix}`);
+  if (query) {
+    for (const [k, v] of Object.entries(query)) {
+      url.searchParams.set(k, v);
+    }
+  }
+  return url.toString();
+};
+
 export const cloudflare = (
   options: CloudflareOptions,
 ): IsolatedSandboxProvider =>
