@@ -1,3 +1,6 @@
+import { mkdtemp, mkdir, writeFile, readFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   buildSandboxUrl,
@@ -286,5 +289,87 @@ describe("create() + exec()", () => {
     await expect(provider.create({ env: {} })).rejects.toThrow(
       /permission denied/,
     );
+  });
+});
+
+describe("copyIn() + copyFileOut()", () => {
+  it("uploads a single file via PUT /files", async () => {
+    const tmp = await mkdtemp(join(tmpdir(), "cf-test-"));
+    const hostFile = join(tmp, "hello.txt");
+    await writeFile(hostFile, "abc");
+    const { fn, calls } = mockFetch([
+      sseResponse([`data: {"type":"exit","code":0}\n\n`]), // warmup
+      new Response(null, { status: 204 }), // PUT /files
+    ]);
+    const provider = cloudflare({
+      workerUrl: "https://example.workers.dev",
+      authToken: "tok",
+      sandboxId: "sb-1",
+      fetch: fn,
+    });
+    const handle = await provider.create({ env: {} });
+    await handle.copyIn(hostFile, "/workspace/hello.txt");
+
+    const putCall = calls[1]!;
+    expect(putCall.init.method).toBe("PUT");
+    expect(putCall.url).toBe(
+      "https://example.workers.dev/sandboxes/sb-1/files?path=%2Fworkspace%2Fhello.txt",
+    );
+    const bodyBytes = new Uint8Array(putCall.init.body as ArrayBuffer);
+    expect(new TextDecoder().decode(bodyBytes)).toBe("abc");
+  });
+
+  it("uploads a directory via POST /files/extract with a tar.gz body", async () => {
+    const tmp = await mkdtemp(join(tmpdir(), "cf-test-"));
+    await mkdir(join(tmp, "src"));
+    await writeFile(join(tmp, "src", "a.txt"), "A");
+    await writeFile(join(tmp, "src", "b.txt"), "B");
+    const { fn, calls } = mockFetch([
+      sseResponse([`data: {"type":"exit","code":0}\n\n`]), // warmup
+      new Response(null, { status: 204 }), // POST /files/extract
+    ]);
+    const provider = cloudflare({
+      workerUrl: "https://example.workers.dev",
+      authToken: "tok",
+      sandboxId: "sb-1",
+      fetch: fn,
+    });
+    const handle = await provider.create({ env: {} });
+    await handle.copyIn(join(tmp, "src"), "/workspace/src");
+
+    const extractCall = calls[1]!;
+    expect(extractCall.init.method).toBe("POST");
+    expect(extractCall.url).toBe(
+      "https://example.workers.dev/sandboxes/sb-1/files/extract?path=%2Fworkspace%2Fsrc",
+    );
+    const headers = new Headers(extractCall.init.headers);
+    expect(headers.get("content-type")).toBe("application/gzip");
+    const bodyBytes = new Uint8Array(extractCall.init.body as ArrayBuffer);
+    // gzip magic bytes
+    expect(bodyBytes[0]).toBe(0x1f);
+    expect(bodyBytes[1]).toBe(0x8b);
+  });
+
+  it("downloads a single file via GET /files", async () => {
+    const tmp = await mkdtemp(join(tmpdir(), "cf-test-"));
+    const dest = join(tmp, "out.txt");
+    const { fn, calls } = mockFetch([
+      sseResponse([`data: {"type":"exit","code":0}\n\n`]),
+      new Response("downloaded", { status: 200 }),
+    ]);
+    const provider = cloudflare({
+      workerUrl: "https://example.workers.dev",
+      authToken: "tok",
+      sandboxId: "sb-1",
+      fetch: fn,
+    });
+    const handle = await provider.create({ env: {} });
+    await handle.copyFileOut("/workspace/out.txt", dest);
+
+    expect(calls[1]!.init.method).toBe("GET");
+    expect(calls[1]!.url).toBe(
+      "https://example.workers.dev/sandboxes/sb-1/files?path=%2Fworkspace%2Fout.txt",
+    );
+    expect(await readFile(dest, "utf8")).toBe("downloaded");
   });
 });

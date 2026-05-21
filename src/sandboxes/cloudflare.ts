@@ -11,6 +11,10 @@
  *   });
  */
 
+import { execSync } from "node:child_process";
+import { mkdir, readFile, stat, unlink, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
 import {
   createIsolatedSandboxProvider,
   type ExecResult,
@@ -202,11 +206,65 @@ export const cloudflare = (
       return {
         worktreePath,
         exec: execImpl,
-        copyIn: async () => {
-          throw new Error("copyIn: not yet implemented");
+        copyIn: async (
+          hostPath: string,
+          sandboxPath: string,
+        ): Promise<void> => {
+          const info = await stat(hostPath);
+          if (info.isDirectory()) {
+            const tarPath = join(
+              tmpdir(),
+              `sandcastle-cf-copyin-${Date.now()}.tar.gz`,
+            );
+            execSync(`tar -czf "${tarPath}" -C "${hostPath}" .`);
+            try {
+              const tarBytes = await readFile(tarPath);
+              const url = buildSandboxUrl(
+                workerUrl,
+                sandboxId,
+                "/files/extract",
+                { path: sandboxPath },
+              );
+              await requireOk(
+                await fetchImpl(url, {
+                  method: "POST",
+                  headers: authHeaders({ "content-type": "application/gzip" }),
+                  body: tarBytes,
+                }),
+                "files/extract",
+              );
+            } finally {
+              await unlink(tarPath).catch(() => {});
+            }
+          } else {
+            const bytes = await readFile(hostPath);
+            const url = buildSandboxUrl(workerUrl, sandboxId, "/files", {
+              path: sandboxPath,
+            });
+            await requireOk(
+              await fetchImpl(url, {
+                method: "PUT",
+                headers: authHeaders(),
+                body: bytes,
+              }),
+              "files PUT",
+            );
+          }
         },
-        copyFileOut: async () => {
-          throw new Error("copyFileOut: not yet implemented");
+        copyFileOut: async (
+          sandboxPath: string,
+          hostPath: string,
+        ): Promise<void> => {
+          const url = buildSandboxUrl(workerUrl, sandboxId, "/files", {
+            path: sandboxPath,
+          });
+          const res = await requireOk(
+            await fetchImpl(url, { method: "GET", headers: authHeaders() }),
+            "files GET",
+          );
+          const buf = Buffer.from(await res.arrayBuffer());
+          await mkdir(dirname(hostPath), { recursive: true });
+          await writeFile(hostPath, buf);
         },
         close: async () => {
           // implemented in a later task
