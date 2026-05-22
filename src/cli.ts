@@ -3,7 +3,15 @@ import { FileSystem } from "@effect/platform";
 import { Effect } from "effect";
 import * as clack from "@clack/prompts";
 import { execSync, spawnSync } from "node:child_process";
+import {
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { createRequire } from "node:module";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { styleText } from "node:util";
 
@@ -570,6 +578,90 @@ const cloudflareSetTokenCommand = Command.make("set-token", {}, () =>
   }),
 );
 
+// --- Cloudflare push-secrets command ---
+
+// Keys that live on the host only — never uploaded as Worker secrets.
+// SANDCASTLE_WORKER_URL is the bridge URL the host calls.
+// CLOUDFLARE_SANDCASTLE_TOKEN is the bridge auth token the host sends.
+// SANDCASTLE_AUTH_TOKEN is the same value seen from the Worker side; it
+// is set separately via `sandcastle cloudflare set-token`.
+const HOST_ONLY_ENV_KEYS = new Set([
+  "SANDCASTLE_WORKER_URL",
+  "CLOUDFLARE_SANDCASTLE_TOKEN",
+  "SANDCASTLE_AUTH_TOKEN",
+]);
+
+const cloudflarePushSecretsCommand = Command.make("push-secrets", {}, () =>
+  Effect.gen(function* () {
+    const d = yield* Display;
+    const cwd = process.cwd();
+    yield* requireCloudflareWorkerDir(cwd);
+    const envPath = join(cwd, ".sandcastle", ".env");
+    if (!existsSync(envPath)) {
+      return yield* Effect.fail(
+        new Error(
+          `Missing ${join(".sandcastle", ".env")}. Create it (see .env.example) before pushing secrets.`,
+        ),
+      );
+    }
+    const raw = readFileSync(envPath, "utf8");
+    // Parse lines into KEY=VALUE pairs, skipping comments/blank lines.
+    const lines = raw.split(/\r?\n/);
+    const filtered: string[] = [];
+    let skipped = 0;
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith("#")) continue;
+      const eqIdx = trimmed.indexOf("=");
+      if (eqIdx === -1) continue;
+      const key = trimmed.slice(0, eqIdx).trim();
+      if (HOST_ONLY_ENV_KEYS.has(key)) {
+        skipped++;
+        continue;
+      }
+      filtered.push(line);
+    }
+    if (filtered.length === 0) {
+      yield* d.status(
+        "No agent secrets found in .sandcastle/.env (host-only keys ignored). Nothing to push.",
+        "info",
+      );
+      return;
+    }
+    const tmpDir = mkdtempSync(join(tmpdir(), "sandcastle-cf-secrets-"));
+    const tmpFile = join(tmpDir, ".env.bulk");
+    writeFileSync(tmpFile, filtered.join("\n") + "\n", { mode: 0o600 });
+    yield* d.status(
+      `Uploading ${filtered.length} secret(s) to the bridge Worker (${skipped} host-only key(s) skipped)...`,
+      "info",
+    );
+    const workerDir = join(cwd, CLOUDFLARE_WORKER_DIR);
+    try {
+      const result = spawnSync("npx", ["wrangler", "secret", "bulk", tmpFile], {
+        cwd: workerDir,
+        stdio: "inherit",
+      });
+      if (result.status !== 0) {
+        return yield* Effect.fail(
+          new Error(
+            `wrangler secret bulk exited with code ${result.status ?? "unknown"}`,
+          ),
+        );
+      }
+    } finally {
+      try {
+        rmSync(tmpDir, { recursive: true, force: true });
+      } catch {
+        // best-effort cleanup
+      }
+    }
+    yield* d.status(
+      "Secrets pushed. The bridge Worker forwards them into every agent exec.",
+      "success",
+    );
+  }),
+);
+
 // --- Cloudflare namespace command ---
 
 const cloudflareCommand = Command.make("cloudflare", {}, () =>
@@ -581,7 +673,11 @@ const cloudflareCommand = Command.make("cloudflare", {}, () =>
     );
   }),
 ).pipe(
-  Command.withSubcommands([cloudflareDeployCommand, cloudflareSetTokenCommand]),
+  Command.withSubcommands([
+    cloudflareDeployCommand,
+    cloudflareSetTokenCommand,
+    cloudflarePushSecretsCommand,
+  ]),
 );
 
 // --- Root command ---

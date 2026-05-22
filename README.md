@@ -132,6 +132,20 @@ SANDCASTLE_WORKER_URL=https://sandcastle-bridge.<acct>.workers.dev
 CLOUDFLARE_SANDCASTLE_TOKEN=<the same token you set via set-token>
 ```
 
+#### Agent secrets
+
+Sandcastle's other providers (Docker, Podman, Vercel, …) inject your `.sandcastle/.env` values into the sandbox at start time. For Cloudflare, secrets live as **Wrangler secrets on your deployed Worker** instead — they never travel over the bridge on every exec.
+
+Once your `.sandcastle/.env` is populated with the values the agent needs (`ANTHROPIC_API_KEY`, `GH_TOKEN`, anything else), push them to the Worker:
+
+```bash
+sandcastle cloudflare push-secrets
+```
+
+This wraps `wrangler secret bulk` and uploads every entry in `.sandcastle/.env` except host-only keys (`SANDCASTLE_WORKER_URL`, `CLOUDFLARE_SANDCASTLE_TOKEN`, `SANDCASTLE_AUTH_TOKEN`). The bridge Worker then forwards every string env binding (minus the auth token) into each `sandbox.exec(cmd, { env })` call, so the agent process sees them like any other provider.
+
+Re-run `push-secrets` whenever you rotate a key or add a new one. `wrangler secret bulk` is idempotent — uploading the same value twice is a no-op.
+
 Use the provider:
 
 ```ts
@@ -152,6 +166,7 @@ Limitations in this release:
 - One sandbox per Sandcastle run (no shared/long-lived sandbox across runs from a single user yet).
 - No preview-URL / port exposure — Sandcastle does not expose ports today.
 - The bridge Worker uses a single shared bearer token; rotate it with `sandcastle cloudflare set-token`.
+- Agent env passed via `claudeCode({ env: { … } })` or `run({ … })` is **not** forwarded to the agent for the cloudflare provider — only Worker secrets are. Push values via `sandcastle cloudflare push-secrets` instead.
 
 ## API
 

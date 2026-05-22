@@ -157,10 +157,11 @@ describe("sandcastle CLI", () => {
     expect(stdout).toContain("cloudflare");
   });
 
-  it("cloudflare --help shows deploy and set-token subcommands", async () => {
+  it("cloudflare --help shows deploy, set-token, and push-secrets subcommands", async () => {
     const { stdout } = await runCli("cloudflare --help", process.cwd());
     expect(stdout).toContain("deploy");
     expect(stdout).toContain("set-token");
+    expect(stdout).toContain("push-secrets");
   });
 
   it("cloudflare deploy errors when .sandcastle/cloudflare-worker is missing", async () => {
@@ -185,6 +186,21 @@ describe("sandcastle CLI", () => {
 
     try {
       await runCli("cloudflare set-token", hostDir);
+      expect.fail("Expected command to fail");
+    } catch (err: unknown) {
+      const { stdout, stderr } = err as { stdout: string; stderr: string };
+      const output = stdout + stderr;
+      expect(output).toContain(".sandcastle/cloudflare-worker");
+    }
+  });
+
+  it("cloudflare push-secrets errors when .sandcastle/cloudflare-worker is missing", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "cli-host-"));
+    await initRepo(hostDir);
+    await commitFile(hostDir, "hello.txt", "hello", "initial commit");
+
+    try {
+      await runCli("cloudflare push-secrets", hostDir);
       expect.fail("Expected command to fail");
     } catch (err: unknown) {
       const { stdout, stderr } = err as { stdout: string; stderr: string };

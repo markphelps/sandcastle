@@ -15,10 +15,24 @@ const isAuthed = (req: Request, env: Env): boolean => {
   return got !== null && got === `Bearer ${env.SANDCASTLE_AUTH_TOKEN}`;
 };
 
+// Internal bindings the bridge owns — do NOT forward to the agent.
+const BRIDGE_INTERNAL_KEYS = new Set(["SANDCASTLE_AUTH_TOKEN"]);
+
+const collectAgentEnv = (env: Env): Record<string, string> => {
+  const out: Record<string, string> = {};
+  for (const [key, value] of Object.entries(env)) {
+    if (typeof value !== "string") continue; // skip DO bindings, etc.
+    if (BRIDGE_INTERNAL_KEYS.has(key)) continue;
+    out[key] = value;
+  }
+  return out;
+};
+
 const streamExec = (
   sandbox: ReturnType<typeof getSandbox>,
   command: string,
   cwd: string | undefined,
+  env: Env,
 ): Response => {
   const { readable, writable } = new TransformStream<Uint8Array, Uint8Array>();
   const writer = writable.getWriter();
@@ -48,6 +62,8 @@ const streamExec = (
         },
       };
       if (cwd !== undefined) execOpts["cwd"] = cwd;
+      const agentEnv = collectAgentEnv(env);
+      if (Object.keys(agentEnv).length > 0) execOpts["env"] = agentEnv;
       const result = await sandbox.exec(command, execOpts);
       if (partialOut) await emit({ type: "stdout", line: partialOut });
       if (partialErr) await emit({ type: "stderr", line: partialErr });
@@ -94,7 +110,7 @@ export default {
         command: string;
         cwd?: string;
       };
-      return streamExec(sandbox, command, cwd);
+      return streamExec(sandbox, command, cwd, env);
     }
 
     if (rest === "/files") {

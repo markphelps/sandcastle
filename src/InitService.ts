@@ -394,9 +394,14 @@ export function getNextStepsLines(
       "Cloudflare bridge Worker setup (run once):",
       "  cd .sandcastle/cloudflare-worker && npm install",
       "  npx wrangler login",
-      "  sandcastle cloudflare set-token   # set SANDCASTLE_AUTH_TOKEN",
-      "  sandcastle cloudflare deploy      # deploy the Worker, prints URL",
+      "  sandcastle cloudflare set-token     # set SANDCASTLE_AUTH_TOKEN",
+      "  sandcastle cloudflare deploy        # deploy the Worker, prints URL",
       "  Then set SANDCASTLE_WORKER_URL in .sandcastle/.env",
+      "",
+      "Push agent secrets (ANTHROPIC_API_KEY, etc.) to the Worker:",
+      "  sandcastle cloudflare push-secrets  # uploads .sandcastle/.env values",
+      "                                        as Worker secrets; skips host-only keys.",
+      "                                        Re-run after editing the .env file.",
     );
   }
   return lines;
