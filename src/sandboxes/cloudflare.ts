@@ -33,8 +33,8 @@ export interface CloudflareOptions {
   /** Override the generated sandbox identifier. Default: crypto.randomUUID(). */
   readonly sandboxId?: string;
   /**
-   * Absolute path inside the sandbox to use as the worktree. Must match the
-   * WORKDIR baked into .sandcastle/Dockerfile. Default: "/home/agent".
+   * Absolute path inside the sandbox to use as the worktree. Defaults to
+   * "/workspace" — the convention used by the `cloudflare/sandbox` base image.
    */
   readonly worktreePath?: string;
   /** Injected fetch for testing. Default: globalThis.fetch. */
@@ -43,7 +43,7 @@ export interface CloudflareOptions {
   readonly env?: Record<string, string>;
 }
 
-const DEFAULT_WORKTREE_PATH = "/home/agent";
+const DEFAULT_WORKTREE_PATH = "/workspace";
 
 export type ExecStreamEvent =
   | { type: "stdout"; line: string }

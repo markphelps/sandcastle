@@ -754,24 +754,28 @@ export const scaffold = (
     }
     const envExampleContent = envExampleParts.join("\n") + "\n";
 
-    yield* Effect.all(
-      [
+    // The cloudflare provider ships its own Dockerfile inside the bridge
+    // Worker template, so we skip writing the standard agent Dockerfile here.
+    const writeOps = [
+      fs
+        .writeFileString(join(configDir, ".gitignore"), GITIGNORE)
+        .pipe(Effect.mapError((e) => new Error(e.message))),
+      fs
+        .writeFileString(join(configDir, ".env.example"), envExampleContent)
+        .pipe(Effect.mapError((e) => new Error(e.message))),
+      copyTemplateFiles(templateDir, configDir, mainFilename),
+    ];
+    if (sandboxProvider.name !== "cloudflare") {
+      writeOps.unshift(
         fs
           .writeFileString(
             join(configDir, sandboxProvider.containerfileName),
             agent.dockerfileTemplate,
           )
           .pipe(Effect.mapError((e) => new Error(e.message))),
-        fs
-          .writeFileString(join(configDir, ".gitignore"), GITIGNORE)
-          .pipe(Effect.mapError((e) => new Error(e.message))),
-        fs
-          .writeFileString(join(configDir, ".env.example"), envExampleContent)
-          .pipe(Effect.mapError((e) => new Error(e.message))),
-        copyTemplateFiles(templateDir, configDir, mainFilename),
-      ],
-      { concurrency: "unbounded" },
-    );
+      );
+    }
+    yield* Effect.all(writeOps, { concurrency: "unbounded" });
 
     // Rewrite main file with the selected agent factory, model, and sandbox provider
     yield* rewriteMainTs(

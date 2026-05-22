@@ -2011,15 +2011,20 @@ describe("scaffold() with cloudflare provider", () => {
     expect(files.sort()).toEqual(
       [
         ".gitignore",
+        "Dockerfile",
         "package.json",
         "tsconfig.json",
         "worker.ts",
         "wrangler.jsonc",
       ].sort(),
     );
-    // Worker references the parent Dockerfile
+    // Worker references its sibling Dockerfile
     const wrangler = await readFile(join(workerDir, "wrangler.jsonc"), "utf-8");
-    expect(wrangler).toContain('"../Dockerfile"');
+    expect(wrangler).toContain('"./Dockerfile"');
+    // The cloudflare-specific Dockerfile is based on the cloudflare/sandbox image
+    const dockerfile = await readFile(join(workerDir, "Dockerfile"), "utf-8");
+    expect(dockerfile).toContain("FROM docker.io/cloudflare/sandbox");
+    expect(dockerfile).toContain("EXPOSE 8080");
   });
 
   it("rewrites main.* import to use cloudflare() instead of docker()", async () => {

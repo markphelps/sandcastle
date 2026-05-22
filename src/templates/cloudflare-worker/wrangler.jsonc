@@ -6,7 +6,7 @@
   "containers": [
     {
       "class_name": "Sandbox",
-      "image": "../Dockerfile",
+      "image": "./Dockerfile",
       "instance_type": "lite",
       "max_instances": 4
     }
