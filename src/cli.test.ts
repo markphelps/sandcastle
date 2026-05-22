@@ -157,11 +157,11 @@ describe("sandcastle CLI", () => {
     expect(stdout).toContain("cloudflare");
   });
 
-  it("cloudflare --help shows deploy, set-token, and push-secrets subcommands", async () => {
+  it("cloudflare --help shows deploy, set-token, and upload-secrets subcommands", async () => {
     const { stdout } = await runCli("cloudflare --help", process.cwd());
     expect(stdout).toContain("deploy");
     expect(stdout).toContain("set-token");
-    expect(stdout).toContain("push-secrets");
+    expect(stdout).toContain("upload-secrets");
   });
 
   it("cloudflare deploy errors when .sandcastle/cloudflare-worker is missing", async () => {
@@ -194,13 +194,13 @@ describe("sandcastle CLI", () => {
     }
   });
 
-  it("cloudflare push-secrets errors when .sandcastle/cloudflare-worker is missing", async () => {
+  it("cloudflare upload-secrets errors when .sandcastle/cloudflare-worker is missing", async () => {
     const hostDir = await mkdtemp(join(tmpdir(), "cli-host-"));
     await initRepo(hostDir);
     await commitFile(hostDir, "hello.txt", "hello", "initial commit");
 
     try {
-      await runCli("cloudflare push-secrets", hostDir);
+      await runCli("cloudflare upload-secrets", hostDir);
       expect.fail("Expected command to fail");
     } catch (err: unknown) {
       const { stdout, stderr } = err as { stdout: string; stderr: string };

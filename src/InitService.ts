@@ -398,10 +398,10 @@ export function getNextStepsLines(
       "  sandcastle cloudflare deploy        # deploy the Worker, prints URL",
       "  Then set SANDCASTLE_WORKER_URL in .sandcastle/.env",
       "",
-      "Push agent secrets (ANTHROPIC_API_KEY, etc.) to the Worker:",
-      "  sandcastle cloudflare push-secrets  # uploads .sandcastle/.env values",
-      "                                        as Worker secrets; skips host-only keys.",
-      "                                        Re-run after editing the .env file.",
+      "Upload agent secrets (ANTHROPIC_API_KEY, etc.) to the Worker:",
+      "  sandcastle cloudflare upload-secrets  # uploads .sandcastle/.env values",
+      "                                          as Worker secrets; skips host-only keys.",
+      "                                          Re-run after editing the .env file.",
     );
   }
   return lines;

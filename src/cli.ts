@@ -578,7 +578,7 @@ const cloudflareSetTokenCommand = Command.make("set-token", {}, () =>
   }),
 );
 
-// --- Cloudflare push-secrets command ---
+// --- Cloudflare upload-secrets command ---
 
 // Keys that live on the host only — never uploaded as Worker secrets.
 // SANDCASTLE_WORKER_URL is the bridge URL the host calls.
@@ -591,7 +591,7 @@ const HOST_ONLY_ENV_KEYS = new Set([
   "SANDCASTLE_AUTH_TOKEN",
 ]);
 
-const cloudflarePushSecretsCommand = Command.make("push-secrets", {}, () =>
+const cloudflareUploadSecretsCommand = Command.make("upload-secrets", {}, () =>
   Effect.gen(function* () {
     const d = yield* Display;
     const cwd = process.cwd();
@@ -600,7 +600,7 @@ const cloudflarePushSecretsCommand = Command.make("push-secrets", {}, () =>
     if (!existsSync(envPath)) {
       return yield* Effect.fail(
         new Error(
-          `Missing ${join(".sandcastle", ".env")}. Create it (see .env.example) before pushing secrets.`,
+          `Missing ${join(".sandcastle", ".env")}. Create it (see .env.example) before uploading secrets.`,
         ),
       );
     }
@@ -623,7 +623,7 @@ const cloudflarePushSecretsCommand = Command.make("push-secrets", {}, () =>
     }
     if (filtered.length === 0) {
       yield* d.status(
-        "No agent secrets found in .sandcastle/.env (host-only keys ignored). Nothing to push.",
+        "No agent secrets found in .sandcastle/.env (host-only keys ignored). Nothing to upload.",
         "info",
       );
       return;
@@ -656,7 +656,7 @@ const cloudflarePushSecretsCommand = Command.make("push-secrets", {}, () =>
       }
     }
     yield* d.status(
-      "Secrets pushed. The bridge Worker forwards them into every agent exec.",
+      "Secrets uploaded. The bridge Worker forwards them into every agent exec.",
       "success",
     );
   }),
@@ -676,7 +676,7 @@ const cloudflareCommand = Command.make("cloudflare", {}, () =>
   Command.withSubcommands([
     cloudflareDeployCommand,
     cloudflareSetTokenCommand,
-    cloudflarePushSecretsCommand,
+    cloudflareUploadSecretsCommand,
   ]),
 );
 
