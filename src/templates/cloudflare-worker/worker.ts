@@ -19,40 +19,39 @@ const streamExec = (
   sandbox: ReturnType<typeof getSandbox>,
   command: string,
   cwd: string | undefined,
-  sudo: boolean | undefined,
 ): Response => {
   const { readable, writable } = new TransformStream<Uint8Array, Uint8Array>();
   const writer = writable.getWriter();
   const encoder = new TextEncoder();
-  const emit = (event: unknown) =>
+  const emit = (event: unknown): Promise<void> =>
     writer.write(encoder.encode(`data: ${JSON.stringify(event)}\n\n`));
+
+  // Buffer partial lines so the wire format is always whole lines.
+  let partialOut = "";
+  let partialErr = "";
 
   (async () => {
     try {
-      // The SDK exposes streaming exec; the exact method name is pinned
-      // against the installed @cloudflare/sandbox version. As of writing
-      // it is `sandbox.execStream({ command, cwd, sudo })` returning an
-      // async iterable of { type: "stdout"|"stderr", data: string } plus
-      // a final exitCode property/promise. Adapt if the SDK differs.
-      const stream = sandbox.execStream({ command, cwd, sudo });
-      let partialOut = "";
-      let partialErr = "";
-      for await (const chunk of stream) {
-        const target = chunk.type === "stdout" ? "stdout" : "stderr";
-        const buffer = target === "stdout" ? partialOut : partialErr;
-        const text = buffer + chunk.data;
-        const lines = text.split("\n");
-        const carry = lines.pop() ?? "";
-        if (target === "stdout") partialOut = carry;
-        else partialErr = carry;
-        for (const line of lines) {
-          await emit({ type: target, line });
-        }
-      }
+      const execOpts: Record<string, unknown> = {
+        stream: true,
+        onOutput: (channel: "stdout" | "stderr", data: string) => {
+          const prev = channel === "stdout" ? partialOut : partialErr;
+          const text = prev + data;
+          const lines = text.split("\n");
+          const carry = lines.pop() ?? "";
+          if (channel === "stdout") partialOut = carry;
+          else partialErr = carry;
+          for (const line of lines) {
+            // Fire-and-forget: writes are ordered through the same writer.
+            emit({ type: channel, line }).catch(() => {});
+          }
+        },
+      };
+      if (cwd !== undefined) execOpts["cwd"] = cwd;
+      const result = await sandbox.exec(command, execOpts);
       if (partialOut) await emit({ type: "stdout", line: partialOut });
       if (partialErr) await emit({ type: "stderr", line: partialErr });
-      const exitCode = await stream.exitCode;
-      await emit({ type: "exit", code: exitCode ?? 0 });
+      await emit({ type: "exit", code: result.exitCode ?? 0 });
     } catch (err) {
       await emit({
         type: "stderr",
@@ -91,34 +90,44 @@ export default {
     }
 
     if (request.method === "POST" && rest === "/exec") {
-      const { command, cwd, sudo } = (await request.json()) as {
+      const { command, cwd } = (await request.json()) as {
         command: string;
         cwd?: string;
-        sudo?: boolean;
       };
-      return streamExec(sandbox, command, cwd, sudo);
+      return streamExec(sandbox, command, cwd);
     }
 
     if (rest === "/files") {
       const path = url.searchParams.get("path");
       if (!path) return new Response("missing path", { status: 400 });
       if (request.method === "PUT") {
+        if (!request.body) return new Response("missing body", { status: 400 });
+        // writeFile with ReadableStream only works on the RPC transport. The
+        // default transport accepts a string + encoding, so we base64-encode.
         const bytes = await request.arrayBuffer();
-        await sandbox.writeFile(path, new Uint8Array(bytes));
+        const b64 = Buffer.from(bytes).toString("base64");
+        await sandbox.writeFile(path, b64, { encoding: "base64" });
         return new Response(null, { status: 204 });
       }
       if (request.method === "GET") {
-        const file = await sandbox.readFile(path);
-        return new Response(file.content);
+        // Read as base64 so binary is preserved; decode and return raw bytes.
+        const file = await sandbox.readFile(path, { encoding: "base64" });
+        const b64 = file.content as string;
+        const bin = atob(b64);
+        const bytes = new Uint8Array(bin.length);
+        for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+        return new Response(bytes);
       }
     }
 
     if (request.method === "POST" && rest === "/files/extract") {
       const path = url.searchParams.get("path");
       if (!path) return new Response("missing path", { status: 400 });
+      if (!request.body) return new Response("missing body", { status: 400 });
       const tmp = `/tmp/sandcastle-${crypto.randomUUID()}.tar.gz`;
       const bytes = await request.arrayBuffer();
-      await sandbox.writeFile(tmp, new Uint8Array(bytes));
+      const b64 = Buffer.from(bytes).toString("base64");
+      await sandbox.writeFile(tmp, b64, { encoding: "base64" });
       const escapedPath = path.replace(/'/g, "'\\''");
       await sandbox.exec(
         `mkdir -p '${escapedPath}' && tar -xzf '${tmp}' -C '${escapedPath}' && rm -f '${tmp}'`,
