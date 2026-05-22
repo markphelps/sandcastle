@@ -287,36 +287,47 @@ const initCommand = Command.make(
         ),
       );
 
-      // Prompt user before building image
+      // Prompt user before building image. Skip for cloudflare — the
+      // container image is built by `wrangler deploy`, not by Sandcastle.
       const providerLabel = selectedSandboxProvider.label;
-      const shouldBuild = yield* Effect.promise(() =>
-        clack.confirm({
-          message: `Build the default ${providerLabel} image now?`,
-          initialValue: true,
-        }),
-      );
-
-      if (shouldBuild === true) {
-        const containerfileDir = join(cwd, CONFIG_DIR);
-        if (selectedSandboxProvider.name === "podman") {
-          yield* d.spinner(
-            `Building ${providerLabel} image '${imageName}'...`,
-            podmanBuildImage(imageName, containerfileDir),
-          );
-        } else {
-          yield* d.spinner(
-            `Building ${providerLabel} image '${imageName}'...`,
-            buildImage(imageName, containerfileDir, {
-              buildArgs: defaultUidBuildArgs(),
-            }),
-          );
-        }
-        yield* d.status("Init complete! Image built successfully.", "success");
-      } else {
+      if (selectedSandboxProvider.name === "cloudflare") {
         yield* d.status(
-          `Init complete! Run \`sandcastle ${selectedSandboxProvider.cliNamespace} build-image\` to build the ${providerLabel} image later.`,
+          "Init complete! The bridge Worker builds the container image during `sandcastle cloudflare deploy`.",
           "success",
         );
+      } else {
+        const shouldBuild = yield* Effect.promise(() =>
+          clack.confirm({
+            message: `Build the default ${providerLabel} image now?`,
+            initialValue: true,
+          }),
+        );
+
+        if (shouldBuild === true) {
+          const containerfileDir = join(cwd, CONFIG_DIR);
+          if (selectedSandboxProvider.name === "podman") {
+            yield* d.spinner(
+              `Building ${providerLabel} image '${imageName}'...`,
+              podmanBuildImage(imageName, containerfileDir),
+            );
+          } else {
+            yield* d.spinner(
+              `Building ${providerLabel} image '${imageName}'...`,
+              buildImage(imageName, containerfileDir, {
+                buildArgs: defaultUidBuildArgs(),
+              }),
+            );
+          }
+          yield* d.status(
+            "Init complete! Image built successfully.",
+            "success",
+          );
+        } else {
+          yield* d.status(
+            `Init complete! Run \`sandcastle ${selectedSandboxProvider.cliNamespace} build-image\` to build the ${providerLabel} image later.`,
+            "success",
+          );
+        }
       }
 
       // Show template-specific next steps
