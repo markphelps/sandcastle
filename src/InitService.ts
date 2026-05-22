@@ -476,7 +476,7 @@ const copyCloudflareWorkerTemplate = (
 ): Effect.Effect<void, Error, FileSystem.FileSystem> =>
   Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem;
-    const srcDir = join(getTemplatesDir(), "cloudflare-worker");
+    const srcDir = join(getTemplatesDir(), "sandboxes", "cloudflare-worker");
     const dstDir = join(configDir, "cloudflare-worker");
     yield* fs
       .makeDirectory(dstDir, { recursive: true })
